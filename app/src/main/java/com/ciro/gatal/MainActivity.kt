@@ -854,180 +854,187 @@ fun HistoryScreen(
     }
 
     val totalSuccessClicks = successList.sumOf { it.clickCount }
+    val sdf = remember { SimpleDateFormat("HH:mm - dd/MM", Locale.getDefault()) }
 
-    Column(
+    LazyColumn(
         modifier = Modifier
             .fillMaxSize()
-            .padding(16.dp)
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text(
-                text = "EVALUASI PERTAHANAN KULIT",
-                color = Color.White,
-                fontSize = 16.sp,
-                fontWeight = FontWeight.Bold
-            )
-            if (historyList.isNotEmpty()) {
-                IconButton(onClick = onClearHistory) {
-                    Icon(Icons.Default.DeleteSweep, contentDescription = "Hapus", tint = Color(0xFF94A3B8))
+        item(key = "header_evaluasi") {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "EVALUASI PERTAHANAN KULIT",
+                    color = Color.White,
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.Bold
+                )
+                if (historyList.isNotEmpty()) {
+                    IconButton(onClick = onClearHistory) {
+                        Icon(Icons.Default.DeleteSweep, contentDescription = "Hapus", tint = Color(0xFF94A3B8))
+                    }
                 }
             }
         }
 
-        Spacer(modifier = Modifier.height(8.dp))
-
-        // TOMBOL CADANGKAN & PULIHKAN DATA TELEGRAM CLOUD
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            OutlinedButton(
-                onClick = onRequestBackup,
-                modifier = Modifier.weight(1f).height(44.dp),
-                shape = RoundedCornerShape(10.dp),
-                colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFF38BDF8)),
-                border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF0284C7))
+        item(key = "tombol_cloud") {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                Icon(Icons.Default.CloudUpload, contentDescription = null, modifier = Modifier.size(18.dp))
-                Spacer(modifier = Modifier.width(6.dp))
-                Text("Cadangkan", fontSize = 12.sp, fontWeight = FontWeight.Bold)
-            }
+                OutlinedButton(
+                    onClick = onRequestBackup,
+                    modifier = Modifier.weight(1f).height(44.dp),
+                    shape = RoundedCornerShape(10.dp),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFF38BDF8)),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF0284C7))
+                ) {
+                    Icon(Icons.Default.CloudUpload, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("Cadangkan", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                }
 
-            OutlinedButton(
-                onClick = onRequestRestore,
-                modifier = Modifier.weight(1f).height(44.dp),
-                shape = RoundedCornerShape(10.dp),
-                colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFF34D399)),
-                border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF059669))
-            ) {
-                Icon(Icons.Default.CloudDownload, contentDescription = null, modifier = Modifier.size(18.dp))
-                Spacer(modifier = Modifier.width(6.dp))
-                Text("Pulihkan", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                OutlinedButton(
+                    onClick = onRequestRestore,
+                    modifier = Modifier.weight(1f).height(44.dp),
+                    shape = RoundedCornerShape(10.dp),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFF34D399)),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF059669))
+                ) {
+                    Icon(Icons.Default.CloudDownload, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("Pulihkan", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                }
             }
         }
-
-        Spacer(modifier = Modifier.height(10.dp))
 
         // KARTU 1: BERHASIL MENAHAN GATAL
-        Card(
-            modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
-            colors = CardDefaults.cardColors(containerColor = Color(0xFF064E3B)),
-            shape = RoundedCornerShape(14.dp)
-        ) {
-            Column(modifier = Modifier.padding(14.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Default.EmojiEvents, contentDescription = null, tint = Color(0xFF34D399))
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("1. Berhasil Menahan Gatal", color = Color(0xFF34D399), fontWeight = FontWeight.Bold, fontSize = 14.sp)
+        item(key = "card_berhasil") {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(containerColor = Color(0xFF064E3B)),
+                shape = RoundedCornerShape(14.dp)
+            ) {
+                Column(modifier = Modifier.padding(14.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.EmojiEvents, contentDescription = null, tint = Color(0xFF34D399))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("1. Berhasil Menahan Gatal", color = Color(0xFF34D399), fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                    }
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text(
+                        text = "• Total Sesi Sukses: ${successList.size} kali\n" +
+                                "• Total Pengalihan Klik: $totalSuccessClicks klik\n" +
+                                "• Rata-rata durasi kamu menahan gatal: ${String.format(Locale.US, "%.1f", avgSuccessDuration)} detik",
+                        color = Color(0xFFD1FAE5),
+                        fontSize = 13.sp,
+                        lineHeight = 18.sp
+                    )
                 }
-                Spacer(modifier = Modifier.height(6.dp))
-                Text(
-                    text = "• Total Sesi Sukses: ${successList.size} kali\n" +
-                            "• Total Pengalihan Klik: $totalSuccessClicks klik\n" +
-                            "• Rata-rata durasi kamu menahan gatal: ${String.format(Locale.US, "%.1f", avgSuccessDuration)} detik",
-                    color = Color(0xFFD1FAE5),
-                    fontSize = 13.sp,
-                    lineHeight = 18.sp
-                )
             }
         }
 
         // KARTU 2: SEWAKTU GAGAL
-        Card(
-            modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
-            colors = CardDefaults.cardColors(containerColor = Color(0xFF450A0A)),
-            shape = RoundedCornerShape(14.dp)
-        ) {
-            Column(modifier = Modifier.padding(14.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Default.Timer, contentDescription = null, tint = Color(0xFFF87171))
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("2. Sewaktu Gagal Menahan", color = Color(0xFFF87171), fontWeight = FontWeight.Bold, fontSize = 14.sp)
+        item(key = "card_gagal") {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(containerColor = Color(0xFF450A0A)),
+                shape = RoundedCornerShape(14.dp)
+            ) {
+                Column(modifier = Modifier.padding(14.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.Timer, contentDescription = null, tint = Color(0xFFF87171))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("2. Sewaktu Gagal Menahan", color = Color(0xFFF87171), fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                    }
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text(
+                        text = "• Total Gagal: ${failedList.size} kali\n• Rata-rata hanya mampu bertahan: ${String.format(Locale.US, "%.1f", avgFailedDuration)} detik",
+                        color = Color(0xFFFEE2E2),
+                        fontSize = 13.sp,
+                        lineHeight = 18.sp
+                    )
                 }
-                Spacer(modifier = Modifier.height(6.dp))
-                Text(
-                    text = "• Total Gagal: ${failedList.size} kali\n• Rata-rata hanya mampu bertahan: ${String.format(Locale.US, "%.1f", avgFailedDuration)} detik",
-                    color = Color(0xFFFEE2E2),
-                    fontSize = 13.sp,
-                    lineHeight = 18.sp
-                )
             }
         }
 
         // KARTU 3: EVALUASI BANDWIDTH MELIHAT LUKA (MINIMAL 15 MENIT)
-        Card(
-            modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
-            colors = CardDefaults.cardColors(containerColor = Color(0xFF1E293B)),
-            shape = RoundedCornerShape(14.dp)
-        ) {
-            Column(modifier = Modifier.padding(14.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Default.Visibility, contentDescription = null, tint = Color(0xFF38BDF8))
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("3. Bandwidth Melihat Luka (Jeda 15 Menit)", color = Color(0xFF38BDF8), fontWeight = FontWeight.Bold, fontSize = 14.sp)
+        item(key = "card_bandwidth") {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(containerColor = Color(0xFF1E293B)),
+                shape = RoundedCornerShape(14.dp)
+            ) {
+                Column(modifier = Modifier.padding(14.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.Visibility, contentDescription = null, tint = Color(0xFF38BDF8))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("3. Bandwidth Melihat Luka (Jeda 15 Menit)", color = Color(0xFF38BDF8), fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                    }
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text(
+                        text = "• Disiplin Kuota (Jeda ≥ 15 Menit): $lookOkCount kali\n" +
+                                "• Pelanggaran Bandwidth (< 15 Menit): $lookFailedCount kali (Bikin mental drop!)",
+                        color = Color(0xFFE2E8F0),
+                        fontSize = 13.sp,
+                        lineHeight = 18.sp
+                    )
                 }
-                Spacer(modifier = Modifier.height(6.dp))
-                Text(
-                    text = "• Disiplin Kuota (Jeda ≥ 15 Menit): $lookOkCount kali\n" +
-                            "• Pelanggaran Bandwidth (< 15 Menit): $lookFailedCount kali (Bikin mental drop!)",
-                    color = Color(0xFFE2E8F0),
-                    fontSize = 13.sp,
-                    lineHeight = 18.sp
-                )
             }
         }
 
         // KARTU 4: REFLEK TANPA TEKAN START (NYENTUH & GARUK)
-        Card(
-            modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp),
-            colors = CardDefaults.cardColors(containerColor = Color(0xFF312E81)),
-            shape = RoundedCornerShape(14.dp)
-        ) {
-            Column(modifier = Modifier.padding(14.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Default.WarningAmber, contentDescription = null, tint = Color(0xFFA5B4FC))
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("4. Reflek Langsung Tanpa Start", color = Color(0xFFA5B4FC), fontWeight = FontWeight.Bold, fontSize = 14.sp)
+        item(key = "card_reflek") {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(containerColor = Color(0xFF312E81)),
+                shape = RoundedCornerShape(14.dp)
+            ) {
+                Column(modifier = Modifier.padding(14.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.WarningAmber, contentDescription = null, tint = Color(0xFFA5B4FC))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("4. Reflek Langsung Tanpa Start", color = Color(0xFFA5B4FC), fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                    }
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text(
+                        text = "• Reflek Cuma Nyentuh/Meraba: $touchOnlyCount kali (Waspada pintu masuk garuk!)\n• Reflek Langsung Garuk: $reflexScratchCount kali",
+                        color = Color(0xFFE0E7FF),
+                        fontSize = 13.sp,
+                        lineHeight = 18.sp
+                    )
                 }
-                Spacer(modifier = Modifier.height(6.dp))
-                Text(
-                    text = "• Reflek Cuma Nyentuh/Meraba: $touchOnlyCount kali (Waspada pintu masuk garuk!)\n• Reflek Langsung Garuk: $reflexScratchCount kali",
-                    color = Color(0xFFE0E7FF),
-                    fontSize = 13.sp,
-                    lineHeight = 18.sp
-                )
             }
         }
 
-        Text(
-            text = "RIWAYAT SESI TERBARU",
-            color = Color(0xFF64748B),
-            fontSize = 11.sp,
-            fontWeight = FontWeight.Bold,
-            letterSpacing = 1.sp
-        )
-        Spacer(modifier = Modifier.height(6.dp))
+        item(key = "sub_header_riwayat") {
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                text = "RIWAYAT SESI TERBARU",
+                color = Color(0xFF64748B),
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Bold,
+                letterSpacing = 1.sp
+            )
+        }
 
         if (historyList.isEmpty()) {
-            Box(
-                modifier = Modifier.fillMaxWidth().weight(1f),
-                contentAlignment = Alignment.Center
-            ) {
-                Text("Belum ada riwayat tercatat. Mulai sesi pertahananmu!", color = Color(0xFF64748B), fontSize = 13.sp)
+            item(key = "empty_history") {
+                Box(
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 24.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text("Belum ada riwayat tercatat. Mulai sesi pertahananmu!", color = Color(0xFF64748B), fontSize = 13.sp)
+                }
             }
         } else {
-            val sdf = remember { SimpleDateFormat("HH:mm - dd/MM", Locale.getDefault()) }
-            LazyColumn(
-                modifier = Modifier.weight(1f),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                items(historyList) { item ->
-                    HistoryRowItem(item, sdf)
-                }
+            items(historyList, key = { it.id }) { item ->
+                HistoryRowItem(item, sdf)
             }
         }
     }
@@ -1088,14 +1095,6 @@ fun AnalysisScreen(historyList: List<HistoryItem>) {
         String.format("%02d:00 - %02d:00 (%d serangan)", peakHour, (peakHour + 1) % 24, maxCountInHour)
     } else {
         "Belum cukup data jam"
-    }
-
-    // 4. KORELASI JEBAKAN MERABA
-    val touchPenaltyRatio = if (touchOnlyCount + reflexScratchCount > 0) {
-        val totalLapses = touchOnlyCount + reflexScratchCount
-        (touchOnlyCount.toDouble() / totalLapses.toDouble()) * 100.0
-    } else {
-        0.0
     }
 
     LazyColumn(
