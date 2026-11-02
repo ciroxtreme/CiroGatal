@@ -1076,26 +1076,20 @@ fun AnalysisScreen(historyList: List<HistoryItem>) {
         } else 0.0
     } else 0.0
 
-    // 3. JAM PALING RAWAN GATAL (PEAK HOURS)
+    // 3. JAM PALING RAWAN GATAL (TOP 3 RENTANG JAM SERANGAN)
     val hourCounts = IntArray(24)
     historyList.forEach { item ->
         val cal = Calendar.getInstance().apply { timeInMillis = item.timestamp }
         val h = cal.get(Calendar.HOUR_OF_DAY)
         hourCounts[h]++
     }
-    var peakHour = -1
-    var maxCountInHour = 0
-    for (h in 0..23) {
-        if (hourCounts[h] > maxCountInHour) {
-            maxCountInHour = hourCounts[h]
-            peakHour = h
-        }
-    }
-    val peakHourText = if (peakHour >= 0 && maxCountInHour > 0) {
-        String.format("%02d:00 - %02d:00 (%d serangan)", peakHour, (peakHour + 1) % 24, maxCountInHour)
-    } else {
-        "Belum cukup data jam"
-    }
+
+    data class PeakHourItem(val hour: Int, val count: Int)
+    val topPeakHours = hourCounts.indices
+        .map { PeakHourItem(it, hourCounts[it]) }
+        .filter { it.count > 0 }
+        .sortedByDescending { it.count }
+        .take(3)
 
     LazyColumn(
         modifier = Modifier
@@ -1175,23 +1169,62 @@ fun AnalysisScreen(historyList: List<HistoryItem>) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Icon(Icons.Default.Alarm, contentDescription = null, tint = Color(0xFFFBBF24), modifier = Modifier.size(20.dp))
                         Spacer(modifier = Modifier.width(8.dp))
-                        Text("JAM RAWAN GATAL (PEAK HOURS)", color = Color(0xFFFBBF24), fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                        Text("3 RENTANG JAM PALING RAWAN", color = Color(0xFFFBBF24), fontWeight = FontWeight.Bold, fontSize = 13.sp)
                     }
-                    Spacer(modifier = Modifier.height(8.dp))
+                    Spacer(modifier = Modifier.height(10.dp))
                     Text(
-                        text = "Jam Paling Rentan Serangan:",
+                        text = "Peringkat Jam Paling Sering Diserang Gatal:",
                         color = Color(0xFF94A3B8),
                         fontSize = 11.sp
                     )
-                    Text(
-                        text = peakHourText,
-                        color = Color.White,
-                        fontSize = 15.sp,
-                        fontWeight = FontWeight.Bold
-                    )
                     Spacer(modifier = Modifier.height(6.dp))
+
+                    if (topPeakHours.isEmpty()) {
+                        Text(
+                            text = "Belum cukup data jam serangan",
+                            color = Color.White,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Medium
+                        )
+                    } else {
+                        val medals = listOf("🥇 Rentang #1", "🥈 Rentang #2", "🥉 Rentang #3")
+                        val colors = listOf(Color(0xFFFBBF24), Color(0xFFE2E8F0), Color(0xFFCD7F32))
+                        topPeakHours.forEachIndexed { index, item ->
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 3.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text(
+                                        text = medals.getOrElse(index) { "#${index + 1}" },
+                                        color = colors.getOrElse(index) { Color.White },
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text(
+                                        text = String.format("%02d:00 - %02d:00", item.hour, (item.hour + 1) % 24),
+                                        color = Color.White,
+                                        fontSize = 14.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                                Text(
+                                    text = "${item.count} serangan",
+                                    color = Color(0xFF38BDF8),
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(8.dp))
                     Text(
-                        text = "💡 Tips Taktis: Menjelang jam rawan ini, pastikan tangan sibuk atau siapkan kain basah dingin sebelum rasa gatal memancing jari secara reflek.",
+                        text = "💡 Tips Taktis: Menjelang 3 jam rawan di atas, pastikan tangan sibuk atau siapkan kain basah dingin sebelum rasa gatal memancing jari secara reflek.",
                         color = Color(0xFFCBD5E1),
                         fontSize = 12.sp,
                         lineHeight = 16.sp
