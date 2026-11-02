@@ -111,7 +111,7 @@ fun CiroGatalApp() {
     var clickCount by remember { mutableStateOf(0) }
     var sessionStartTime by remember { mutableStateOf(0L) }
     var currentElapsedSeconds by remember { mutableStateOf(0L) }
-    var selectedTab by remember { mutableStateOf(0) } // 0: Tracker, 1: Riwayat & Statistik
+    var selectedTab by remember { mutableStateOf(0) } // 0: Fighter, 1: Riwayat, 2: Analisa
 
     // Dialog State Konfirmasi Cadangkan & Restore
     var showBackupConfirmDialog by remember { mutableStateOf(false) }
@@ -176,12 +176,25 @@ fun CiroGatalApp() {
                         unselectedTextColor = Color(0xFF64748B)
                     )
                 )
+                NavigationBarItem(
+                    selected = selectedTab == 2,
+                    onClick = { selectedTab = 2 },
+                    icon = { Icon(Icons.Default.Insights, contentDescription = "Analisa") },
+                    label = { Text("Analisa") },
+                    colors = NavigationBarItemDefaults.colors(
+                        selectedIconColor = Color(0xFFFBBF24),
+                        selectedTextColor = Color(0xFFFBBF24),
+                        indicatorColor = Color(0xFF1E293B),
+                        unselectedIconColor = Color(0xFF64748B),
+                        unselectedTextColor = Color(0xFF64748B)
+                    )
+                )
             }
         }
     ) { padding ->
         Box(modifier = Modifier.padding(padding).fillMaxSize()) {
-            if (selectedTab == 0) {
-                TrackerScreen(
+            when (selectedTab) {
+                0 -> TrackerScreen(
                     isSessionActive = isSessionActive,
                     clickCount = clickCount,
                     durationSeconds = currentElapsedSeconds,
@@ -225,7 +238,7 @@ fun CiroGatalApp() {
                     onRecordLookWound = {
                         val now = System.currentTimeMillis()
                         val diffSeconds = (now - lastLookTime) / 1000
-                        val isOverBudget = lastLookTime > 0 && diffSeconds < 900 // kurang dari 15 menit (900 detik)
+                        val isOverBudget = lastLookTime > 0 && diffSeconds < 900 // kurang dari 15 menit
                         
                         val newItem = if (isOverBudget) {
                             HistoryItem(
@@ -274,8 +287,7 @@ fun CiroGatalApp() {
                         triggerHaptic(context, true)
                     }
                 )
-            } else {
-                HistoryScreen(
+                1 -> HistoryScreen(
                     historyList = historyList,
                     onClearHistory = {
                         historyList = emptyList()
@@ -298,6 +310,7 @@ fun CiroGatalApp() {
                         }
                     }
                 )
+                2 -> AnalysisScreen(historyList = historyList)
             }
 
             // DIALOG 1: KONFIRMASI SEBELUM CADANGKAN DATA
@@ -899,7 +912,7 @@ fun HistoryScreen(
 
         Spacer(modifier = Modifier.height(10.dp))
 
-        // KARTU 1: BERHASIL MENAHAN GATAL (DITAMBAH RATA-RATA DURASI SESUAI INSTRUKSI)
+        // KARTU 1: BERHASIL MENAHAN GATAL
         Card(
             modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
             colors = CardDefaults.cardColors(containerColor = Color(0xFF064E3B)),
@@ -1014,6 +1027,249 @@ fun HistoryScreen(
             ) {
                 items(historyList) { item ->
                     HistoryRowItem(item, sdf)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun AnalysisScreen(historyList: List<HistoryItem>) {
+    val successList = historyList.filter { it.type == "SUCCESS" }
+    val failedList = historyList.filter { it.type == "FAILED" }
+    val touchOnlyCount = historyList.count { it.type == "TOUCH_ONLY" }
+    val reflexScratchCount = historyList.count { it.type == "REFLEX_SCRATCH" }
+    val lookOkCount = historyList.count { it.type == "LOOK_WOUND_OK" }
+    val lookFailedCount = historyList.count { it.type == "LOOK_WOUND_FAILED" }
+
+    // 1. SKOR WILLPOWER KULIT (0 - 100)
+    val totalUrges = successList.size + failedList.size + reflexScratchCount
+    val score = if (totalUrges == 0 && touchOnlyCount == 0 && lookFailedCount == 0) {
+        100
+    } else {
+        val winWeight = successList.size * 25
+        val lookOkWeight = lookOkCount * 10
+        val penalty = (failedList.size * 20) + (reflexScratchCount * 30) + (touchOnlyCount * 15) + (lookFailedCount * 15)
+        val raw = 50 + winWeight + lookOkWeight - penalty
+        raw.coerceIn(0, 100)
+    }
+
+    val (badgeTitle, badgeColor, badgeAdvice) = when {
+        score >= 85 -> Triple("ZEN MASTER (Kebal Godaan)", Color(0xFF34D399), "Mentalmu sangat kokoh! Disiplin ini akan mempercepat pengeringan luka 2x lipat.")
+        score >= 65 -> Triple("PEJUANG TANGGUH", Color(0xFF38BDF8), "Pertahanan bagus. Waspadai jam santai di mana tangan suka melayang ke luka tanpa sadar.")
+        score >= 45 -> Triple("ZONA WASPADA", Color(0xFFFBBF24), "Jari masih sering gemas ingin meraba. Ingat: Sekali meraba, gerbang garukan langsung terbuka!")
+        else -> Triple("DARURAT (Borgol Tangan!)", Color(0xFFF87171), "Reflek garukan terlalu dominan. Kompres es batu atau genggam benda padat saat gatal datang!")
+    }
+
+    // 2. EFISIENSI KETUKAN (CPS)
+    val avgCpsSuccess = if (successList.isNotEmpty()) {
+        val validSessions = successList.filter { it.durationSeconds > 0 }
+        if (validSessions.isNotEmpty()) {
+            validSessions.map { it.clickCount.toDouble() / it.durationSeconds.toDouble() }.average()
+        } else 0.0
+    } else 0.0
+
+    // 3. JAM PALING RAWAN GATAL (PEAK HOURS)
+    val hourCounts = IntArray(24)
+    historyList.forEach { item ->
+        val cal = Calendar.getInstance().apply { timeInMillis = item.timestamp }
+        val h = cal.get(Calendar.HOUR_OF_DAY)
+        hourCounts[h]++
+    }
+    var peakHour = -1
+    var maxCountInHour = 0
+    for (h in 0..23) {
+        if (hourCounts[h] > maxCountInHour) {
+            maxCountInHour = hourCounts[h]
+            peakHour = h
+        }
+    }
+    val peakHourText = if (peakHour >= 0 && maxCountInHour > 0) {
+        String.format("%02d:00 - %02d:00 (%d serangan)", peakHour, (peakHour + 1) % 24, maxCountInHour)
+    } else {
+        "Belum cukup data jam"
+    }
+
+    // 4. KORELASI JEBAKAN MERABA
+    val touchPenaltyRatio = if (touchOnlyCount + reflexScratchCount > 0) {
+        val totalLapses = touchOnlyCount + reflexScratchCount
+        (touchOnlyCount.toDouble() / totalLapses.toDouble()) * 100.0
+    } else {
+        0.0
+    }
+
+    LazyColumn(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        item {
+            Text(
+                text = "DIAGNOSTIK & ANALISA POLA",
+                color = Color.White,
+                fontSize = 16.sp,
+                fontWeight = FontWeight.Bold
+            )
+            Text(
+                text = "Pelatih mental digital untuk mempercepat kesembuhan kulit",
+                color = Color(0xFF94A3B8),
+                fontSize = 12.sp
+            )
+        }
+
+        // KARTU 1: WILLPOWER METER & BADGE
+        item {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(containerColor = Color(0xFF1E293B)),
+                shape = RoundedCornerShape(16.dp)
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("SKOR KETAHANAN KULIT", color = Color(0xFF94A3B8), fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        Text(
+                            text = "$score / 100",
+                            color = badgeColor,
+                            fontSize = 24.sp,
+                            fontWeight = FontWeight.Black
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    LinearProgressIndicator(
+                        progress = { score / 100f },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(10.dp)
+                            .clip(RoundedCornerShape(5.dp)),
+                        color = badgeColor,
+                        trackColor = Color(0xFF0F172A)
+                    )
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.Verified, contentDescription = null, tint = badgeColor, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(badgeTitle, color = badgeColor, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                    }
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(badgeAdvice, color = Color(0xFFCBD5E1), fontSize = 12.sp, lineHeight = 17.sp)
+                }
+            }
+        }
+
+        // KARTU 2: JAM RAWAN GATAL & POLA BIOLOGIS
+        item {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(containerColor = Color(0xFF1E293B)),
+                shape = RoundedCornerShape(16.dp)
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.Alarm, contentDescription = null, tint = Color(0xFFFBBF24), modifier = Modifier.size(20.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("JAM RAWAN GATAL (PEAK HOURS)", color = Color(0xFFFBBF24), fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                    }
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = "Jam Paling Rentan Serangan:",
+                        color = Color(0xFF94A3B8),
+                        fontSize = 11.sp
+                    )
+                    Text(
+                        text = peakHourText,
+                        color = Color.White,
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text(
+                        text = "💡 Tips Taktis: Menjelang jam rawan ini, pastikan tangan sibuk atau siapkan kain basah dingin sebelum rasa gatal memancing jari secara reflek.",
+                        color = Color(0xFFCBD5E1),
+                        fontSize = 12.sp,
+                        lineHeight = 16.sp
+                    )
+                }
+            }
+        }
+
+        // KARTU 3: EFEKTIVITAS KETUKAN (CPS)
+        item {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(containerColor = Color(0xFF1E293B)),
+                shape = RoundedCornerShape(16.dp)
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.Speed, contentDescription = null, tint = Color(0xFF38BDF8), modifier = Modifier.size(20.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("EFEKTIVITAS DISTRAKSI SARAF (CPS)", color = Color(0xFF38BDF8), fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                    }
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column {
+                            Text("Rata-rata Ritme Klik Sukses:", color = Color(0xFF94A3B8), fontSize = 11.sp)
+                            Text(
+                                text = "${String.format(Locale.US, "%.1f", avgCpsSuccess)} klik / detik",
+                                color = Color.White,
+                                fontSize = 18.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text(
+                        text = "Neurosains Gate Control membuktikan: ketukan cepat dan beruntun di layar HP membanjiri reseptor saraf sensorik sehingga sinyal gatal di otak langsung terblokir lebih cepat!",
+                        color = Color(0xFFCBD5E1),
+                        fontSize = 12.sp,
+                        lineHeight = 16.sp
+                    )
+                }
+            }
+        }
+
+        // KARTU 4: DIAGNOSIS "JEBAKAN MERABA"
+        item {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(containerColor = Color(0xFF2D1829)),
+                shape = RoundedCornerShape(16.dp)
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.Psychology, contentDescription = null, tint = Color(0xFFE879F9), modifier = Modifier.size(20.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("DIAGNOSIS JEBAKAN MERABA", color = Color(0xFFE879F9), fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                    }
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = "• Reflek Cuma Meraba: $touchOnlyCount kali\n" +
+                                "• Reflek Langsung Garuk: $reflexScratchCount kali\n" +
+                                "• Pelanggaran Bandwidth Melihat: $lookFailedCount kali",
+                        color = Color(0xFFF5D0FE),
+                        fontSize = 12.sp,
+                        lineHeight = 17.sp
+                    )
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text(
+                        text = "Peringatan Absolut: Otak sering menipu dengan dalih 'cuma mau pegang/raba doang'. Begitu jari menyentuh kulit, tekanan mikro akan melepaskan histamin baru dan langsung berujung garukan. Pegang teguh aturan: Cuma Boleh Melihat!",
+                        color = Color(0xFFCBD5E1),
+                        fontSize = 12.sp,
+                        lineHeight = 16.sp
+                    )
                 }
             }
         }
