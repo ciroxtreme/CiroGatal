@@ -1,0 +1,53 @@
+name: Build Android APK
+
+on:
+  push:
+    branches: [ "main", "master" ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+
+      - name: Setup Gradle 9.3.1
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.3.1'
+
+      - name: Setup Persistent Keystore
+        run: |
+          if [ ! -f "debug.keystore" ]; then
+            echo "Generating debug.keystore..."
+            keytool -genkey -v -keystore debug.keystore -storepass android -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=CiroGatal, OU=Ciro, O=CiroGatal, L=Jakarta, ST=Jakarta, C=ID" -noprompt
+          else
+            echo "Using committed persistent debug.keystore!"
+          fi
+
+      - name: Build Debug APK
+        run: gradle assembleDebug --stacktrace --info
+
+      - name: Send APK Directly to Telegram
+        env:
+          BOT_TOKEN: "9190592895:AAE_HT_68nvR5p1ku_V7_08pRmo3c3QWP9I"
+          CHAT_ID: "1936436999"
+        run: |
+          APK_FILE=$(find app/build/outputs/apk -name "*.apk" | head -n 1)
+          echo "Found APK: $APK_FILE"
+          
+          CAPTION="🛡️ <b>APK Ciro Gatal (AntiScratch Urge Tracker) Siap!</b> 🎌%0A━━━━━━━━━━━━━━━━━━━━%0AKonnichiwa, Tuan Ciro! ✨%0A%0A✅ <b>Build Sukses! Siap Diinstall Langsung!</b>%0A• <b>🎯 Clicker Zone Bebas:</b> Ketuk layar sepuasnya tanpa aturan untuk mengalihkan rangsangan saraf & hilangkan gatal.%0A• <b>💡 Mindset & Sugesti Kuat:</b> Banner pengingat kesadaran (cukup lihat saja) + teks afirmasi saat diklik:%0A  <i>'Semakin gatal semakin kamu sering klik percaya gatalnya akan hilang'</i>%0A• <b>📊 3 Kategori Evaluasi Riwayat:</b>%0A  1. Sukses menahan gatal (durasi & jumlah klik).%0A  2. Gagal menahan (rata-rata durasi bertahan sebelum menyerah).%0A  3. Reflek tanpa sesi: Cuma menyentuh (pintu masuk garuk) vs langsung garuk.%0A%0A🚀 <i>CiroGatal-debug.apk (com.ciro.gatal)</i>"
+          
+          curl -v -F "chat_id=${CHAT_ID}" \
+               -F "document=@${APK_FILE};filename=CiroGatal-debug.apk" \
+               -F "caption=${CAPTION}" \
+               -F "parse_mode=HTML" \
+               "https://api.telegram.org/bot${BOT_TOKEN}/sendDocument"
