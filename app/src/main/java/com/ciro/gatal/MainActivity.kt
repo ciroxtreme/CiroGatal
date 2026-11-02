@@ -42,7 +42,7 @@ import java.util.*
 
 data class HistoryItem(
     val id: String = UUID.randomUUID().toString(),
-    val type: String, // "SUCCESS", "FAILED", "TOUCH_ONLY", "REFLEX_SCRATCH"
+    val type: String, // "SUCCESS", "FAILED", "TOUCH_ONLY", "REFLEX_SCRATCH", "LOOK_WOUND_OK", "LOOK_WOUND_FAILED"
     val clickCount: Int = 0,
     val durationSeconds: Long = 0,
     val timestamp: Long = System.currentTimeMillis()
@@ -104,6 +104,9 @@ fun CiroGatalApp() {
     val prefs = remember { context.getSharedPreferences("ciro_gatal_prefs", Context.MODE_PRIVATE) }
 
     var historyList by remember { mutableStateOf(loadHistory(prefs)) }
+    var lastLookTime by remember { mutableStateOf(prefs.getLong("last_look_time", 0L)) }
+    var currentTime by remember { mutableStateOf(System.currentTimeMillis()) }
+
     var isSessionActive by remember { mutableStateOf(false) }
     var clickCount by remember { mutableStateOf(0) }
     var sessionStartTime by remember { mutableStateOf(0L) }
@@ -118,6 +121,14 @@ fun CiroGatalApp() {
     var cloudBackupList by remember { mutableStateOf<List<TelegramBackupManager.TelegramBackupMessage>>(emptyList()) }
     var pendingRestoreContent by remember { mutableStateOf<String?>(null) }
     var pendingRestoreItemCount by remember { mutableStateOf(0) }
+
+    // Heartbeat waktu per detik untuk hitung mundur cooldown Bandwidth Melihat
+    LaunchedEffect(Unit) {
+        while (true) {
+            currentTime = System.currentTimeMillis()
+            delay(1000)
+        }
+    }
 
     // Timer effect saat sesi aktif
     LaunchedEffect(isSessionActive) {
@@ -174,6 +185,8 @@ fun CiroGatalApp() {
                     isSessionActive = isSessionActive,
                     clickCount = clickCount,
                     durationSeconds = currentElapsedSeconds,
+                    lastLookTime = lastLookTime,
+                    currentTime = currentTime,
                     onStartSession = {
                         clickCount = 0
                         isSessionActive = true
@@ -208,6 +221,37 @@ fun CiroGatalApp() {
                         historyList = listOf(newItem) + historyList
                         saveHistory(prefs, historyList)
                         triggerHaptic(context, true)
+                    },
+                    onRecordLookWound = {
+                        val now = System.currentTimeMillis()
+                        val diffSeconds = (now - lastLookTime) / 1000
+                        val isOverBudget = lastLookTime > 0 && diffSeconds < 900 // kurang dari 15 menit (900 detik)
+                        
+                        val newItem = if (isOverBudget) {
+                            HistoryItem(
+                                type = "LOOK_WOUND_FAILED",
+                                durationSeconds = diffSeconds,
+                                timestamp = now
+                            )
+                        } else {
+                            HistoryItem(
+                                type = "LOOK_WOUND_OK",
+                                durationSeconds = if (lastLookTime == 0L) 900 else diffSeconds,
+                                timestamp = now
+                            )
+                        }
+
+                        lastLookTime = now
+                        prefs.edit().putLong("last_look_time", now).apply()
+                        historyList = listOf(newItem) + historyList
+                        saveHistory(prefs, historyList)
+                        triggerHaptic(context, true)
+
+                        if (isOverBudget) {
+                            Toast.makeText(context, "⚠️ Bandwidth Jebol! Belum 15 menit sudah melihat luka lagi. Mental bisa drop!", Toast.LENGTH_LONG).show()
+                        } else {
+                            Toast.makeText(context, "✅ Kuota melihat aman (sudah lewat 15 menit). Tetap tenang!", Toast.LENGTH_SHORT).show()
+                        }
                     },
                     onRecordTouchOnly = {
                         val newItem = HistoryItem(
@@ -453,10 +497,13 @@ fun TrackerScreen(
     isSessionActive: Boolean,
     clickCount: Int,
     durationSeconds: Long,
+    lastLookTime: Long,
+    currentTime: Long,
     onStartSession: () -> Unit,
     onClickTarget: () -> Unit,
     onStopSuccess: () -> Unit,
     onStopFailed: () -> Unit,
+    onRecordLookWound: () -> Unit,
     onRecordTouchOnly: () -> Unit,
     onRecordReflexScratch: () -> Unit
 ) {
@@ -470,7 +517,7 @@ fun TrackerScreen(
         Card(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(bottom = 12.dp),
+                .padding(bottom = 10.dp),
             colors = CardDefaults.cardColors(containerColor = Color(0xFF1E293B)),
             shape = RoundedCornerShape(16.dp)
         ) {
@@ -502,13 +549,75 @@ fun TrackerScreen(
             }
         }
 
+        // KARTU BANDWIDTH MELIHAT LUKA (JEDA MINIMAL 15 MENIT)
+        val elapsedSinceLook = if (lastLookTime > 0) (currentTime - lastLookTime) / 1000 else 9999L
+        val cooldownSeconds = if (elapsedSinceLook < 900) 900 - elapsedSinceLook else 0L
+        val canLookSafely = cooldownSeconds == 0L
+
+        Card(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(bottom = 10.dp),
+            colors = CardDefaults.cardColors(
+                containerColor = if (canLookSafely) Color(0xFF132E27) else Color(0xFF3B1D11)
+            ),
+            shape = RoundedCornerShape(14.dp)
+        ) {
+            Row(
+                modifier = Modifier.padding(12.dp).fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            imageVector = if (canLookSafely) Icons.Default.CheckCircle else Icons.Default.HourglassTop,
+                            contentDescription = null,
+                            tint = if (canLookSafely) Color(0xFF34D399) else Color(0xFFFBBF24),
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = "BANDWIDTH MELIHAT LUKA",
+                            color = if (canLookSafely) Color(0xFF34D399) else Color(0xFFFBBF24),
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = if (canLookSafely) {
+                            "Status Aman: Boleh intip luka sekilas (jeda 15m terpenuhi)"
+                        } else {
+                            "Tahan! Cooldown sisa: ${String.format("%02d:%02d", cooldownSeconds / 60, cooldownSeconds % 60)} (Sering lihat bikin mental drop!)"
+                        },
+                        color = Color(0xFFE2E8F0),
+                        fontSize = 11.sp
+                    )
+                }
+
+                Button(
+                    onClick = onRecordLookWound,
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = if (canLookSafely) Color(0xFF059669) else Color(0xFFB45309)
+                    ),
+                    shape = RoundedCornerShape(10.dp),
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
+                ) {
+                    Icon(Icons.Default.RemoveRedEye, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("Intip Luka", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                }
+            }
+        }
+
         if (!isSessionActive) {
             // TAMPILAN IDLE SEBELUM MULAI
             Spacer(modifier = Modifier.weight(0.5f))
 
             Box(
                 modifier = Modifier
-                    .size(230.dp)
+                    .size(210.dp)
                     .clip(CircleShape)
                     .background(
                         Brush.radialGradient(
@@ -523,24 +632,24 @@ fun TrackerScreen(
                         imageVector = Icons.Default.Shield,
                         contentDescription = "Mulai",
                         tint = Color.White,
-                        modifier = Modifier.size(54.dp)
+                        modifier = Modifier.size(50.dp)
                     )
-                    Spacer(modifier = Modifier.height(8.dp))
+                    Spacer(modifier = Modifier.height(6.dp))
                     Text(
                         text = "MULAI TAHAN\nGATAL",
                         color = Color.White,
-                        fontSize = 18.sp,
+                        fontSize = 17.sp,
                         fontWeight = FontWeight.Black,
                         textAlign = TextAlign.Center
                     )
                 }
             }
 
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(14.dp))
             Text(
                 text = "Tekan tombol di atas saat gatal mulai menyerang.\nKetuk layar bebas untuk mengalihkan saraf!",
                 color = Color(0xFF94A3B8),
-                fontSize = 13.sp,
+                fontSize = 12.sp,
                 textAlign = TextAlign.Center
             )
 
@@ -562,7 +671,7 @@ fun TrackerScreen(
             ) {
                 Button(
                     onClick = onRecordTouchOnly,
-                    modifier = Modifier.weight(1f).height(52.dp),
+                    modifier = Modifier.weight(1f).height(50.dp),
                     colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFB45309)),
                     shape = RoundedCornerShape(12.dp)
                 ) {
@@ -573,7 +682,7 @@ fun TrackerScreen(
 
                 Button(
                     onClick = onRecordReflexScratch,
-                    modifier = Modifier.weight(1f).height(52.dp),
+                    modifier = Modifier.weight(1f).height(50.dp),
                     colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF991B1B)),
                     shape = RoundedCornerShape(12.dp)
                 ) {
@@ -582,7 +691,7 @@ fun TrackerScreen(
                     Text("Reflek Garuk", fontSize = 12.sp, fontWeight = FontWeight.Bold)
                 }
             }
-            Spacer(modifier = Modifier.height(8.dp))
+            Spacer(modifier = Modifier.height(6.dp))
         } else {
             // TAMPILAN SESI AKTIF (CLICKER ZONE)
             Row(
@@ -716,6 +825,14 @@ fun HistoryScreen(
     val failedList = historyList.filter { it.type == "FAILED" }
     val touchOnlyCount = historyList.count { it.type == "TOUCH_ONLY" }
     val reflexScratchCount = historyList.count { it.type == "REFLEX_SCRATCH" }
+    val lookOkCount = historyList.count { it.type == "LOOK_WOUND_OK" }
+    val lookFailedCount = historyList.count { it.type == "LOOK_WOUND_FAILED" }
+
+    val avgSuccessDuration = if (successList.isNotEmpty()) {
+        successList.map { it.durationSeconds }.average()
+    } else {
+        0.0
+    }
 
     val avgFailedDuration = if (failedList.isNotEmpty()) {
         failedList.map { it.durationSeconds }.average()
@@ -782,7 +899,7 @@ fun HistoryScreen(
 
         Spacer(modifier = Modifier.height(10.dp))
 
-        // KARTU 1: BERHASIL MENAHAN GATAL
+        // KARTU 1: BERHASIL MENAHAN GATAL (DITAMBAH RATA-RATA DURASI SESUAI INSTRUKSI)
         Card(
             modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
             colors = CardDefaults.cardColors(containerColor = Color(0xFF064E3B)),
@@ -796,7 +913,9 @@ fun HistoryScreen(
                 }
                 Spacer(modifier = Modifier.height(6.dp))
                 Text(
-                    text = "• Total Sesi Sukses: ${successList.size} kali\n• Total Pengalihan Klik: $totalSuccessClicks klik",
+                    text = "• Total Sesi Sukses: ${successList.size} kali\n" +
+                            "• Total Pengalihan Klik: $totalSuccessClicks klik\n" +
+                            "• Rata-rata durasi kamu menahan gatal: ${String.format(Locale.US, "%.1f", avgSuccessDuration)} detik",
                     color = Color(0xFFD1FAE5),
                     fontSize = 13.sp,
                     lineHeight = 18.sp
@@ -826,7 +945,30 @@ fun HistoryScreen(
             }
         }
 
-        // KARTU 3: REFLEK TANPA TEKAN START (NYENTUH & GARUK)
+        // KARTU 3: EVALUASI BANDWIDTH MELIHAT LUKA (MINIMAL 15 MENIT)
+        Card(
+            modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
+            colors = CardDefaults.cardColors(containerColor = Color(0xFF1E293B)),
+            shape = RoundedCornerShape(14.dp)
+        ) {
+            Column(modifier = Modifier.padding(14.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.Visibility, contentDescription = null, tint = Color(0xFF38BDF8))
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("3. Bandwidth Melihat Luka (Jeda 15 Menit)", color = Color(0xFF38BDF8), fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                }
+                Spacer(modifier = Modifier.height(6.dp))
+                Text(
+                    text = "• Disiplin Kuota (Jeda ≥ 15 Menit): $lookOkCount kali\n" +
+                            "• Pelanggaran Bandwidth (< 15 Menit): $lookFailedCount kali (Bikin mental drop!)",
+                    color = Color(0xFFE2E8F0),
+                    fontSize = 13.sp,
+                    lineHeight = 18.sp
+                )
+            }
+        }
+
+        // KARTU 4: REFLEK TANPA TEKAN START (NYENTUH & GARUK)
         Card(
             modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp),
             colors = CardDefaults.cardColors(containerColor = Color(0xFF312E81)),
@@ -836,7 +978,7 @@ fun HistoryScreen(
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Icon(Icons.Default.WarningAmber, contentDescription = null, tint = Color(0xFFA5B4FC))
                     Spacer(modifier = Modifier.width(8.dp))
-                    Text("3. Reflek Langsung Tanpa Start", color = Color(0xFFA5B4FC), fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                    Text("4. Reflek Langsung Tanpa Start", color = Color(0xFFA5B4FC), fontWeight = FontWeight.Bold, fontSize = 14.sp)
                 }
                 Spacer(modifier = Modifier.height(6.dp))
                 Text(
@@ -883,6 +1025,8 @@ fun HistoryRowItem(item: HistoryItem, sdf: SimpleDateFormat) {
     val (bgColor, titleColor, titleText, icon) = when (item.type) {
         "SUCCESS" -> Quadruple(Color(0xFF0F2E23), Color(0xFF34D399), "Berhasil Menahan Gatal", Icons.Default.CheckCircle)
         "FAILED" -> Quadruple(Color(0xFF2E1212), Color(0xFFF87171), "Gagal Menahan", Icons.Default.Cancel)
+        "LOOK_WOUND_OK" -> Quadruple(Color(0xFF132E27), Color(0xFF38BDF8), "Intip Luka (Sesuai Kuota)", Icons.Default.Visibility)
+        "LOOK_WOUND_FAILED" -> Quadruple(Color(0xFF3B1D11), Color(0xFFF97316), "Intip Luka (Terlalu Sering <15m)", Icons.Default.VisibilityOff)
         "TOUCH_ONLY" -> Quadruple(Color(0xFF2E2412), Color(0xFFFBBF24), "Reflek Nyentuh Luka", Icons.Default.PanTool)
         else -> Quadruple(Color(0xFF24152E), Color(0xFFC084FC), "Reflek Garuk Langsung", Icons.Default.Warning)
     }
@@ -900,16 +1044,26 @@ fun HistoryRowItem(item: HistoryItem, sdf: SimpleDateFormat) {
             Spacer(modifier = Modifier.width(10.dp))
             Column(modifier = Modifier.weight(1f)) {
                 Text(titleText, color = titleColor, fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                if (item.type == "SUCCESS" || item.type == "FAILED") {
-                    Text(
-                        "${item.clickCount} klik • Durasi: ${item.durationSeconds} detik",
-                        color = Color(0xFFE2E8F0),
-                        fontSize = 12.sp
-                    )
-                } else if (item.type == "TOUCH_ONLY") {
-                    Text("Hanya meraba luka (ingat: cukup lihat saja!)", color = Color(0xFFE2E8F0), fontSize = 12.sp)
-                } else {
-                    Text("Tergaruk spontan tanpa persiapan", color = Color(0xFFE2E8F0), fontSize = 12.sp)
+                when (item.type) {
+                    "SUCCESS", "FAILED" -> {
+                        Text(
+                            "${item.clickCount} klik • Durasi: ${item.durationSeconds} detik",
+                            color = Color(0xFFE2E8F0),
+                            fontSize = 12.sp
+                        )
+                    }
+                    "LOOK_WOUND_OK" -> {
+                        Text("Disiplin jeda ${item.durationSeconds / 60} menit sejak intipan sebelumnya", color = Color(0xFFE2E8F0), fontSize = 12.sp)
+                    }
+                    "LOOK_WOUND_FAILED" -> {
+                        Text("Baru jalan ${item.durationSeconds / 60} menit sudah diintip! Mental rentan down", color = Color(0xFFE2E8F0), fontSize = 12.sp)
+                    }
+                    "TOUCH_ONLY" -> {
+                        Text("Hanya meraba luka (ingat: cukup lihat saja!)", color = Color(0xFFE2E8F0), fontSize = 12.sp)
+                    }
+                    else -> {
+                        Text("Tergaruk spontan tanpa persiapan", color = Color(0xFFE2E8F0), fontSize = 12.sp)
+                    }
                 }
             }
             Text(
