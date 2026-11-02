@@ -3,10 +3,10 @@ package com.ciro.gatal
 import android.content.Context
 import android.os.Build
 import android.os.Bundle
-import android.os.CombinedVibration
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.animation.*
@@ -26,7 +26,6 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
@@ -35,6 +34,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import org.json.JSONArray
 import org.json.JSONObject
 import java.text.SimpleDateFormat
@@ -100,15 +100,24 @@ fun triggerHaptic(context: Context, strong: Boolean = false) {
 @Composable
 fun CiroGatalApp() {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     val prefs = remember { context.getSharedPreferences("ciro_gatal_prefs", Context.MODE_PRIVATE) }
-    
+
     var historyList by remember { mutableStateOf(loadHistory(prefs)) }
     var isSessionActive by remember { mutableStateOf(false) }
     var clickCount by remember { mutableStateOf(0) }
     var sessionStartTime by remember { mutableStateOf(0L) }
     var currentElapsedSeconds by remember { mutableStateOf(0L) }
-    var clickPulse by remember { mutableStateOf(false) }
     var selectedTab by remember { mutableStateOf(0) } // 0: Tracker, 1: Riwayat & Statistik
+
+    // Dialog State Konfirmasi Cadangkan & Restore
+    var showBackupConfirmDialog by remember { mutableStateOf(false) }
+    var showRestoreSelectDialog by remember { mutableStateOf(false) }
+    var showRestoreConfirmDialog by remember { mutableStateOf(false) }
+    var isOperatingCloud by remember { mutableStateOf(false) }
+    var cloudBackupList by remember { mutableStateOf<List<TelegramBackupManager.TelegramBackupMessage>>(emptyList()) }
+    var pendingRestoreContent by remember { mutableStateOf<String?>(null) }
+    var pendingRestoreItemCount by remember { mutableStateOf(0) }
 
     // Timer effect saat sesi aktif
     LaunchedEffect(isSessionActive) {
@@ -173,7 +182,6 @@ fun CiroGatalApp() {
                     onClickTarget = {
                         clickCount++
                         triggerHaptic(context, false)
-                        clickPulse = !clickPulse
                     },
                     onStopSuccess = {
                         val finalDuration = currentElapsedSeconds
@@ -228,8 +236,213 @@ fun CiroGatalApp() {
                     onClearHistory = {
                         historyList = emptyList()
                         saveHistory(prefs, historyList)
+                    },
+                    onRequestBackup = {
+                        showBackupConfirmDialog = true
+                    },
+                    onRequestRestore = {
+                        isOperatingCloud = true
+                        scope.launch {
+                            val list = TelegramBackupManager.fetchLatestBackupsFromTelegram()
+                            isOperatingCloud = false
+                            if (list.isEmpty()) {
+                                Toast.makeText(context, "Belum ada berkas cadangan ditemukan di Telegram!", Toast.LENGTH_LONG).show()
+                            } else {
+                                cloudBackupList = list
+                                showRestoreSelectDialog = true
+                            }
+                        }
                     }
                 )
+            }
+
+            // DIALOG 1: KONFIRMASI SEBELUM CADANGKAN DATA
+            if (showBackupConfirmDialog) {
+                AlertDialog(
+                    onDismissRequest = { showBackupConfirmDialog = false },
+                    icon = { Icon(Icons.Default.CloudUpload, contentDescription = null, tint = Color(0xFF38BDF8)) },
+                    title = { Text("Cadangkan Data ke Telegram?", fontWeight = FontWeight.Bold) },
+                    text = {
+                        Text(
+                            "Total ${historyList.size} catatan riwayat tahan gatal akan dikirim dan disimpan dengan aman ke Telegram Tuan Ciro sebagai berkas cadangan JSON.\n\nLanjutkan pencadangan sekarang?",
+                            color = Color(0xFFCBD5E1),
+                            fontSize = 13.sp
+                        )
+                    },
+                    confirmButton = {
+                        Button(
+                            onClick = {
+                                showBackupConfirmDialog = false
+                                isOperatingCloud = true
+                                scope.launch {
+                                    val jsonStr = exportHistoryToJson(historyList)
+                                    val ok = TelegramBackupManager.uploadBackupToTelegram(jsonStr)
+                                    isOperatingCloud = false
+                                    if (ok) {
+                                        Toast.makeText(context, "✅ Berhasil dicadangkan ke Telegram!", Toast.LENGTH_SHORT).show()
+                                    } else {
+                                        Toast.makeText(context, "❌ Gagal mengunggah ke Telegram. Cek koneksi!", Toast.LENGTH_LONG).show()
+                                    }
+                                }
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0284C7))
+                        ) {
+                            Text("Ya, Cadangkan")
+                        }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { showBackupConfirmDialog = false }) {
+                            Text("Batal", color = Color(0xFF94A3B8))
+                        }
+                    },
+                    containerColor = Color(0xFF1E293B)
+                )
+            }
+
+            // DIALOG 2: PILIH VERSI CADANGAN DARI TELEGRAM
+            if (showRestoreSelectDialog) {
+                AlertDialog(
+                    onDismissRequest = { showRestoreSelectDialog = false },
+                    icon = { Icon(Icons.Default.CloudDownload, contentDescription = null, tint = Color(0xFF34D399)) },
+                    title = { Text("Pilih Cadangan Telegram", fontWeight = FontWeight.Bold) },
+                    text = {
+                        Column {
+                            Text(
+                                "Ditemukan berkas cadangan di riwayat bot Telegram. Pilih salah satu untuk dipulihkan:",
+                                color = Color(0xFFCBD5E1),
+                                fontSize = 13.sp,
+                                modifier = Modifier.padding(bottom = 10.dp)
+                            )
+                            LazyColumn(modifier = Modifier.fillMaxWidth().heightIn(max = 240.dp)) {
+                                items(cloudBackupList) { item ->
+                                    Card(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(vertical = 4.dp)
+                                            .clickable {
+                                                showRestoreSelectDialog = false
+                                                isOperatingCloud = true
+                                                scope.launch {
+                                                    val raw = TelegramBackupManager.downloadBackupContentByFileId(item.fileId)
+                                                    isOperatingCloud = false
+                                                    if (!raw.isNullOrBlank()) {
+                                                        val count = try { JSONArray(raw).length() } catch (_: Exception) { 0 }
+                                                        pendingRestoreContent = raw
+                                                        pendingRestoreItemCount = count
+                                                        showRestoreConfirmDialog = true
+                                                    } else {
+                                                        Toast.makeText(context, "Gagal mengunduh berkas dari Telegram!", Toast.LENGTH_SHORT).show()
+                                                    }
+                                                }
+                                            },
+                                        colors = CardDefaults.cardColors(containerColor = Color(0xFF0F172A))
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.padding(12.dp).fillMaxWidth(),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Icon(Icons.Default.InsertDriveFile, contentDescription = null, tint = Color(0xFF38BDF8))
+                                            Spacer(modifier = Modifier.width(10.dp))
+                                            Column(modifier = Modifier.weight(1f)) {
+                                                Text(item.fileName, color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                                Text(item.formattedDate, color = Color(0xFF94A3B8), fontSize = 11.sp)
+                                            }
+                                            Icon(Icons.Default.ChevronRight, contentDescription = null, tint = Color(0xFF64748B))
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    confirmButton = {
+                        TextButton(onClick = { showRestoreSelectDialog = false }) {
+                            Text("Tutup", color = Color(0xFF94A3B8))
+                        }
+                    },
+                    containerColor = Color(0xFF1E293B)
+                )
+            }
+
+            // DIALOG 3: KONFIRMASI MUTLAK SEBELUM RESTORE DATA DITIMPA
+            if (showRestoreConfirmDialog) {
+                AlertDialog(
+                    onDismissRequest = { showRestoreConfirmDialog = false },
+                    icon = { Icon(Icons.Default.WarningAmber, contentDescription = null, tint = Color(0xFFFBBF24)) },
+                    title = { Text("Konfirmasi Pulihkan Data?", fontWeight = FontWeight.Bold) },
+                    text = {
+                        Text(
+                            "⚠️ PERHATIAN:\n\nBerkas cadangan berisi $pendingRestoreItemCount riwayat akan dimuat ke aplikasi.\n\nApakah Tuan Ciro ingin MENGGABUNGKAN dengan data lokal saat ini, atau MENIMPA (Ganti Total)?",
+                            color = Color(0xFFE2E8F0),
+                            fontSize = 13.sp,
+                            lineHeight = 18.sp
+                        )
+                    },
+                    confirmButton = {
+                        Row {
+                            TextButton(
+                                onClick = {
+                                    showRestoreConfirmDialog = false
+                                    pendingRestoreContent?.let { raw ->
+                                        val imported = parseHistoryFromJson(raw)
+                                        // GABUNGKAN
+                                        val combined = (imported + historyList).distinctBy { it.id }
+                                        historyList = combined
+                                        saveHistory(prefs, combined)
+                                        Toast.makeText(context, "✅ Berhasil digabungkan! Total: ${combined.size} data", Toast.LENGTH_SHORT).show()
+                                    }
+                                }
+                            ) {
+                                Text("Gabungkan", color = Color(0xFF38BDF8), fontWeight = FontWeight.Bold)
+                            }
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Button(
+                                onClick = {
+                                    showRestoreConfirmDialog = false
+                                    pendingRestoreContent?.let { raw ->
+                                        val imported = parseHistoryFromJson(raw)
+                                        // TIMPA
+                                        historyList = imported
+                                        saveHistory(prefs, imported)
+                                        Toast.makeText(context, "✅ Data berhasil ditimpa dari cadangan!", Toast.LENGTH_SHORT).show()
+                                    }
+                                },
+                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFDC2626))
+                            ) {
+                                Text("Timpa Total")
+                            }
+                        }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { showRestoreConfirmDialog = false }) {
+                            Text("Batal", color = Color(0xFF94A3B8))
+                        }
+                    },
+                    containerColor = Color(0xFF1E293B)
+                )
+            }
+
+            // LOADING CLOUD OVERLAY
+            if (isOperatingCloud) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(Color.Black.copy(alpha = 0.6f)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Card(
+                        colors = CardDefaults.cardColors(containerColor = Color(0xFF1E293B)),
+                        shape = RoundedCornerShape(16.dp)
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(24.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            CircularProgressIndicator(color = Color(0xFF38BDF8))
+                            Spacer(modifier = Modifier.height(14.dp))
+                            Text("Menghubungkan ke Telegram Cloud...", color = Color.White, fontSize = 13.sp)
+                        }
+                    }
+                }
             }
         }
     }
@@ -495,7 +708,9 @@ fun TrackerScreen(
 @Composable
 fun HistoryScreen(
     historyList: List<HistoryItem>,
-    onClearHistory: () -> Unit
+    onClearHistory: () -> Unit,
+    onRequestBackup: () -> Unit,
+    onRequestRestore: () -> Unit
 ) {
     val successList = historyList.filter { it.type == "SUCCESS" }
     val failedList = historyList.filter { it.type == "FAILED" }
@@ -530,6 +745,38 @@ fun HistoryScreen(
                 IconButton(onClick = onClearHistory) {
                     Icon(Icons.Default.DeleteSweep, contentDescription = "Hapus", tint = Color(0xFF94A3B8))
                 }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        // TOMBOL CADANGKAN & PULIHKAN DATA TELEGRAM CLOUD
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            OutlinedButton(
+                onClick = onRequestBackup,
+                modifier = Modifier.weight(1f).height(44.dp),
+                shape = RoundedCornerShape(10.dp),
+                colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFF38BDF8)),
+                border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF0284C7))
+            ) {
+                Icon(Icons.Default.CloudUpload, contentDescription = null, modifier = Modifier.size(18.dp))
+                Spacer(modifier = Modifier.width(6.dp))
+                Text("Cadangkan", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+            }
+
+            OutlinedButton(
+                onClick = onRequestRestore,
+                modifier = Modifier.weight(1f).height(44.dp),
+                shape = RoundedCornerShape(10.dp),
+                colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFF34D399)),
+                border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF059669))
+            ) {
+                Icon(Icons.Default.CloudDownload, contentDescription = null, modifier = Modifier.size(18.dp))
+                Spacer(modifier = Modifier.width(6.dp))
+                Text("Pulihkan", fontSize = 12.sp, fontWeight = FontWeight.Bold)
             }
         }
 
@@ -676,27 +923,24 @@ fun HistoryRowItem(item: HistoryItem, sdf: SimpleDateFormat) {
 
 data class Quadruple<A, B, C, D>(val first: A, val second: B, val third: C, val fourth: D)
 
-fun saveHistory(prefs: android.content.SharedPreferences, list: List<HistoryItem>) {
-    try {
-        val array = JSONArray()
-        list.take(100).forEach { item ->
-            val obj = JSONObject()
-            obj.put("id", item.id)
-            obj.put("type", item.type)
-            obj.put("clickCount", item.clickCount)
-            obj.put("durationSeconds", item.durationSeconds)
-            obj.put("timestamp", item.timestamp)
-            array.put(obj)
-        }
-        prefs.edit().putString("history_json", array.toString()).apply()
-    } catch (_: Exception) {}
+fun exportHistoryToJson(list: List<HistoryItem>): String {
+    val array = JSONArray()
+    list.forEach { item ->
+        val obj = JSONObject()
+        obj.put("id", item.id)
+        obj.put("type", item.type)
+        obj.put("clickCount", item.clickCount)
+        obj.put("durationSeconds", item.durationSeconds)
+        obj.put("timestamp", item.timestamp)
+        array.put(obj)
+    }
+    return array.toString(2)
 }
 
-fun loadHistory(prefs: android.content.SharedPreferences): List<HistoryItem> {
+fun parseHistoryFromJson(jsonStr: String): List<HistoryItem> {
     val list = mutableListOf<HistoryItem>()
     try {
-        val str = prefs.getString("history_json", null) ?: return emptyList()
-        val array = JSONArray(str)
+        val array = JSONArray(jsonStr)
         for (i in 0 until array.length()) {
             val obj = array.getJSONObject(i)
             list.add(
@@ -711,4 +955,16 @@ fun loadHistory(prefs: android.content.SharedPreferences): List<HistoryItem> {
         }
     } catch (_: Exception) {}
     return list
+}
+
+fun saveHistory(prefs: android.content.SharedPreferences, list: List<HistoryItem>) {
+    try {
+        val str = exportHistoryToJson(list)
+        prefs.edit().putString("history_json", str).apply()
+    } catch (_: Exception) {}
+}
+
+fun loadHistory(prefs: android.content.SharedPreferences): List<HistoryItem> {
+    val str = prefs.getString("history_json", null) ?: return emptyList()
+    return parseHistoryFromJson(str)
 }
